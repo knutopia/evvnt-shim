@@ -1,0 +1,98 @@
+{
+  "ticketmaster": {
+    "apiKey": "YOUR_TICKETMASTER_API_KEY",
+    "baseUrl": "https://app.ticketmaster.com/discovery/v2",
+    "maxResultsPerPage": 100,
+    "countryCode": "US",
+    "stateCode": "TX",
+    "dmaId": "261",
+    "_comment_dma": "261 = Dallas-Fort Worth DMA. See: https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/#search-events-v2"
+  },
+
+  "evvnt": {
+    "_comment": "Swap these in when you get Evvnt credentials",
+    "apiKey": "",
+    "apiSecret": "",
+    "baseUrl": "https://api.evvnt.com"
+  },
+
+  "sync": {
+    "intervalMinutes": 15,
+    "enabled": true,
+    "_comment": "Set enabled:false to only sync on startup and manual trigger"
+  },
+
+  "server": {
+    "port": 3000
+  },
+
+  "clients": {
+    "attpac": {
+      "label": "AT&T Performing Arts Center",
+      "presenters": [
+        "AT&T Performing Arts Center",
+        "Dallas Symphony Orchestra",
+        "Dallas Theater Center",
+        "Texas Ballet Theater",
+        "The Dallas Opera",
+        "Dallas Black Dance Theatre",
+        "TITAS Presents",
+        "Lone Star Film Festival"
+      ],
+      "venues": [
+        "Winspear Opera House",
+        "Margot and Bill Winspear Opera House",
+        "Wyly Theatre",
+        "Dee and Charles Wyly Theatre",
+        "Strauss Square",
+        "Annette Strauss Square",
+        "Morton H. Meyerson Symphony Center",
+        "Meyerson Symphony Center",
+        "Majestic Theatre",
+        "Music Hall at Fair Park",
+        "Moody Performance Hall"
+      ]
+    },
+
+    "oac_dallas": {
+      "label": "Dallas Office of Arts and Culture",
+      "presenters": [
+        "AT&T Performing Arts Center",
+        "Dallas Symphony Orchestra",
+        "Dallas Theater Center",
+        "Texas Ballet Theater",
+        "The Dallas Opera",
+        "Dallas Black Dance Theatre",
+        "TITAS Presents",
+        "Dallas Museum of Art",
+        "Nasher Sculpture Center",
+        "Crow Museum of Asian Art",
+        "Dallas Contemporary",
+        "Shakespeare Dallas",
+        "Kitchen Dog Theater",
+        "Undermain Theatre",
+        "Bishop Arts Theatre Center",
+        "Cara Mia Theatre",
+        "Teatro Dallas",
+        "Soul Rep Theatre Company",
+        "Booker T. Washington HSPVA"
+      ],
+      "venues": [
+        "Winspear Opera House",
+        "Wyly Theatre",
+        "Strauss Square",
+        "Morton H. Meyerson Symphony Center",
+        "Majestic Theatre",
+        "Music Hall at Fair Park",
+        "Moody Performance Hall",
+        "Dallas Museum of Art",
+        "Nasher Sculpture Center",
+        "Crow Museum of Asian Art",
+        "Latino Cultural Center",
+        "South Dallas Cultural Center",
+        "Bath House Cultural Center",
+        "Sammons Center for the Arts"
+      ]
+    }
+  }
+}

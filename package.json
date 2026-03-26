@@ -1,0 +1,16 @@
+{
+  "name": "evvnt-calendar-shim",
+  "version": "1.0.0",
+  "description": "Middleware shim that fetches events from Ticketmaster (swap for Evvnt), filters by presenter/venue, and serves legacy XML feed",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "express": "^4.18.2",
+    "node-cron": "^3.0.3",
+    "xmlbuilder2": "^3.1.1"
+  }
+}
