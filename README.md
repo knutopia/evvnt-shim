@@ -7,9 +7,11 @@ Middleware service that fetches events from Ticketmaster (designed to be swapped
 ```bash
 npm install
 npm start
+npm start -- --verbose
 ```
 
 The server starts on `http://localhost:3000` with **mock data** by default (no API key needed to test).
+Use `-v` or `--verbose` to print sync-volume metrics after startup, scheduled, and manual syncs.
 
 ## Endpoints
 

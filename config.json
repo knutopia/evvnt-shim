@@ -1,6 +1,6 @@
 {
   "ticketmaster": {
-    "apiKey": "TICKETMASTER_API_KEY=lv3rSgZvrvMRG6VWvUIKEtnJENUUwrrt",
+    "apiKey": "lv3rSgZvrvMRG6VWvUIKEtnJENUUwrrt",
     "baseUrl": "https://app.ticketmaster.com/discovery/v2",
     "maxResultsPerPage": 100,
     "countryCode": "US",

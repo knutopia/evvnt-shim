@@ -8,6 +8,7 @@
  * Usage:
  *   npm install
  *   npm start
+ *   npm start -- --verbose
  *
  * Endpoints:
  *   GET /feed/:clientId.xml   → Filtered XML feed (e.g., /feed/attpac.xml)
@@ -31,6 +32,7 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "
 const PORT = config.server.port || 3000;
 if (process.env.TICKETMASTER_API_KEY) config.ticketmaster.apiKey = process.env.TICKETMASTER_API_KEY;
 const USE_MOCK = config.ticketmaster.apiKey === "YOUR_TICKETMASTER_API_KEY";
+const VERBOSE_SYNC = process.argv.includes("-v") || process.argv.includes("--verbose");
 
 // ─── In-Memory Cache ─────────────────────────────────────────────────────────
 
@@ -82,7 +84,7 @@ function fetchTicketmasterPage(pageNumber) {
 /**
  * Fetch all events with automatic pagination.
  */
-async function fetchAllEvents() {
+async function fetchAllEvents(syncStats) {
   const allEvents = [];
   let page = 0;
   let totalPages = 1;
@@ -90,7 +92,9 @@ async function fetchAllEvents() {
   while (page < totalPages) {
     console.log(`  Fetching page ${page + 1}${totalPages > 1 ? ` of ${totalPages}` : ""}...`);
 
+    syncStats.apiRequests++;
     const response = await fetchTicketmasterPage(page);
+    syncStats.pagesFetched++;
 
     if (response.fault) {
       throw new Error(`API error: ${response.fault.faultstring}`);
@@ -99,6 +103,7 @@ async function fetchAllEvents() {
     if (response._embedded && response._embedded.events) {
       allEvents.push(...response._embedded.events);
     }
+    syncStats.retrievedTotal = allEvents.length;
 
     if (response.page) {
       totalPages = Math.min(response.page.totalPages || 1, 5); // Cap at 5 pages for dev
@@ -361,8 +366,14 @@ function formatDate(base, offsetDays) {
 
 // ─── Sync Engine ─────────────────────────────────────────────────────────────
 
-async function syncEvents() {
+async function syncEvents(trigger = "manual") {
   const startTime = Date.now();
+  const syncStats = {
+    apiRequests: 0,
+    pagesFetched: 0,
+    retrievedTotal: 0,
+  };
+
   console.log(`\n[${new Date().toISOString()}] Starting event sync...`);
 
   try {
@@ -371,8 +382,9 @@ async function syncEvents() {
     if (USE_MOCK) {
       console.log("  Using MOCK data (no API key configured)");
       events = generateMockEvents();
+      syncStats.retrievedTotal = events.length;
     } else {
-      const rawEvents = await fetchAllEvents();
+      const rawEvents = await fetchAllEvents(syncStats);
       console.log(`  Fetched ${rawEvents.length} raw events from Ticketmaster`);
       events = rawEvents.map(normalizeTicketmasterEvent);
     }
@@ -384,10 +396,23 @@ async function syncEvents() {
     cache.errors = [];
 
     console.log(`  Cached ${events.length} events (${cache.lastSyncDuration}ms)`);
+    logVerboseSyncSummary({
+      trigger,
+      durationMs: cache.lastSyncDuration,
+      syncStats,
+      events,
+    });
     console.log(`  Sync complete.\n`);
   } catch (err) {
+    const durationMs = Date.now() - startTime;
     console.error(`  Sync FAILED: ${err.message}`);
     cache.errors.push({ time: new Date().toISOString(), message: err.message });
+    logVerboseSyncFailure({
+      trigger,
+      durationMs,
+      syncStats,
+      error: err,
+    });
   }
 }
 
@@ -406,6 +431,146 @@ function matchesAny(value, allowList) {
   });
 }
 
+function getClientMatchDetails(event, clientConfig) {
+  const presenterMatch = matchesAny(event.presenter, clientConfig.presenters) ||
+    matchesAny(event._raw?.promoterName, clientConfig.presenters) ||
+    (event._raw?.attractionNames || []).some((name) => matchesAny(name, clientConfig.presenters));
+
+  const venueMatch = matchesAny(event.venue.name, clientConfig.venues) ||
+    matchesAny(event._raw?.venueName, clientConfig.venues);
+
+  return {
+    presenterMatch,
+    venueMatch,
+    eitherMatch: presenterMatch || venueMatch,
+  };
+}
+
+function countEventXmlRows(event) {
+  return event.performances.length > 0 ? event.performances.length : 1;
+}
+
+function collectVerboseSyncMetrics(events) {
+  const matchedEventIndexes = new Set();
+  const clientSummaries = [];
+  const startDates = [];
+  const endDates = [];
+  const seenIds = new Set();
+  let duplicateIds = 0;
+
+  const missingFields = {
+    title: 0,
+    presenter: 0,
+    venue: 0,
+    startDate: 0,
+  };
+
+  for (const event of events) {
+    if (event.startDate) {
+      startDates.push(event.startDate);
+    } else {
+      missingFields.startDate++;
+    }
+
+    if (event.endDate) {
+      endDates.push(event.endDate);
+    }
+
+    if (!event.title) missingFields.title++;
+    if (!event.presenter) missingFields.presenter++;
+    if (!event.venue?.name) missingFields.venue++;
+
+    if (event.id) {
+      if (seenIds.has(event.id)) {
+        duplicateIds++;
+      } else {
+        seenIds.add(event.id);
+      }
+    }
+  }
+
+  for (const [clientId, clientConfig] of Object.entries(config.clients)) {
+    const clientSummary = {
+      clientId,
+      either: 0,
+      presenterOnly: 0,
+      venueOnly: 0,
+      both: 0,
+      unmatched: 0,
+      xmlRows: 0,
+    };
+
+    events.forEach((event, index) => {
+      const match = getClientMatchDetails(event, clientConfig);
+      if (!match.eitherMatch) return;
+
+      matchedEventIndexes.add(index);
+      clientSummary.either++;
+      clientSummary.xmlRows += countEventXmlRows(event);
+
+      if (match.presenterMatch && match.venueMatch) {
+        clientSummary.both++;
+      } else if (match.presenterMatch) {
+        clientSummary.presenterOnly++;
+      } else {
+        clientSummary.venueOnly++;
+      }
+    });
+
+    clientSummary.unmatched = events.length - clientSummary.either;
+    clientSummaries.push(clientSummary);
+  }
+
+  return {
+    matchedAnyClientTotal: matchedEventIndexes.size,
+    unmatchedAllClientsTotal: events.length - matchedEventIndexes.size,
+    dateRangeStart: startDates.length > 0 ? startDates.reduce((min, value) => (value < min ? value : min)) : "n/a",
+    dateRangeEnd: endDates.length > 0 ? endDates.reduce((max, value) => (value > max ? value : max)) : "n/a",
+    duplicateIds,
+    clientSummaries,
+    missingFields,
+  };
+}
+
+function logVerboseSyncSummary({ trigger, durationMs, syncStats, events }) {
+  if (!VERBOSE_SYNC) return;
+
+  const metrics = collectVerboseSyncMetrics(events);
+
+  console.log("[verbose] sync_summary");
+  console.log(`  trigger=${trigger} mode=${USE_MOCK ? "mock" : "live"} duration_ms=${durationMs}`);
+  console.log(
+    `  retrieved_total=${syncStats.retrievedTotal} normalized_total=${events.length} api_requests=${syncStats.apiRequests} pages_fetched=${syncStats.pagesFetched}`
+  );
+  console.log(
+    `  matched_any_client_total=${metrics.matchedAnyClientTotal} unmatched_all_clients_total=${metrics.unmatchedAllClientsTotal}`
+  );
+  console.log(
+    `  date_range_start=${metrics.dateRangeStart} date_range_end=${metrics.dateRangeEnd} duplicate_ids=${metrics.duplicateIds}`
+  );
+
+  for (const clientSummary of metrics.clientSummaries) {
+    console.log(
+      `  client=${clientSummary.clientId} either=${clientSummary.either} presenter_only=${clientSummary.presenterOnly} venue_only=${clientSummary.venueOnly} both=${clientSummary.both} unmatched=${clientSummary.unmatched} xml_rows=${clientSummary.xmlRows}`
+    );
+  }
+
+  console.log(
+    `  missing_fields title=${metrics.missingFields.title} presenter=${metrics.missingFields.presenter} venue=${metrics.missingFields.venue} start_date=${metrics.missingFields.startDate}`
+  );
+}
+
+function logVerboseSyncFailure({ trigger, durationMs, syncStats, error }) {
+  if (!VERBOSE_SYNC) return;
+
+  console.log("[verbose] sync_failed");
+  console.log(`  trigger=${trigger} mode=${USE_MOCK ? "mock" : "live"} duration_ms=${durationMs}`);
+  console.log(
+    `  api_requests=${syncStats.apiRequests} pages_fetched=${syncStats.pagesFetched} retrieved_total_so_far=${syncStats.retrievedTotal}`
+  );
+  console.log(`  error=${JSON.stringify(error.message)}`);
+}
+
 /**
  * Filter cached events for a specific client configuration.
  * An event passes if its presenter OR venue matches the client's allowlists.
@@ -414,16 +579,7 @@ function filterEventsForClient(clientId) {
   const clientConfig = config.clients[clientId];
   if (!clientConfig) return null;
 
-  return cache.events.filter((event) => {
-    const presenterMatch = matchesAny(event.presenter, clientConfig.presenters) ||
-      matchesAny(event._raw?.promoterName, clientConfig.presenters) ||
-      (event._raw?.attractionNames || []).some((name) => matchesAny(name, clientConfig.presenters));
-
-    const venueMatch = matchesAny(event.venue.name, clientConfig.venues) ||
-      matchesAny(event._raw?.venueName, clientConfig.venues);
-
-    return presenterMatch || venueMatch;
-  });
+  return cache.events.filter((event) => getClientMatchDetails(event, clientConfig).eitherMatch);
 }
 
 // ─── XML Serialization ───────────────────────────────────────────────────────
@@ -547,7 +703,7 @@ app.get("/status", (req, res) => {
 
 // Manual sync trigger
 app.post("/sync", async (req, res) => {
-  await syncEvents();
+  await syncEvents("manual");
   res.json({ message: "Sync complete", totalEvents: cache.events.length, lastSync: cache.lastSync });
 });
 
@@ -586,13 +742,13 @@ async function start() {
   }
 
   // Initial sync
-  await syncEvents();
+  await syncEvents("startup");
 
   // Scheduled sync
   if (config.sync.enabled) {
     const minutes = config.sync.intervalMinutes || 15;
     cron.schedule(`*/${minutes} * * * *`, () => {
-      syncEvents();
+      syncEvents("cron");
     });
     console.log(`Scheduled sync every ${minutes} minutes.`);
   }
@@ -602,7 +758,8 @@ async function start() {
     console.log();
     console.log("Available feeds:");
     for (const [id, cfg] of Object.entries(config.clients)) {
-      console.log(`  ${cfg.label}: http://localhost:${PORT}/feed/${id}.xml`);
+      const events = filterEventsForClient(id) || [];
+      console.log(`  ${cfg.label}: http://localhost:${PORT}/feed/${id}.xml with ${events.length} events`);
     }
     console.log(`\nStatus: http://localhost:${PORT}/status`);
     console.log();
